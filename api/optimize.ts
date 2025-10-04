@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 		const prompt = buildPrompt(dependencies, devDependencies);
 		console.log("Sending prompt to OpenRouter:", prompt);
 
-		const model = request.headers.get("x-model") || "openai/gpt-5-codex";
+		const model = request.headers.get("x-model") || "deepseek/deepseek-r1:free";
 
 		const response = await fetch(
 			"https://openrouter.ai/api/v1/chat/completions",
