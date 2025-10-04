@@ -1,3 +1,5 @@
+import Groq from "groq-sdk";
+
 export const config = {
 	runtime: "edge",
 };
@@ -49,31 +51,51 @@ export async function POST(request: Request) {
 		}
 
 		const prompt = buildPrompt(dependencies, devDependencies);
-		console.log("Sending prompt to OpenRouter:", prompt);
 
-		const model = request.headers.get("x-model") || "deepseek/deepseek-r1:free";
+		/*
+    // Open Router
+    console.log("Sending prompt to OpenRouter:", prompt);
 
-		const response = await fetch(
-			"https://openrouter.ai/api/v1/chat/completions",
-			{
-				method: "POST",
-				headers: {
-					Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-					"Content-Type": "application/json",
-					"HTTP-Referer": "https://byteshrink.dev",
-					"X-Title": "ByteShrink API",
+    const model = request.headers.get("x-model") || "deepseek/deepseek-r1:free";
+
+    const response = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://byteshrink.dev",
+          "X-Title": "ByteShrink API",
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.3,
+        }),
+      },
+    );
+
+    const json = await response.json();
+
+    const reply = json?.choices?.[0]?.message?.content;
+    */
+
+		// Groq
+		console.log("Sending prompt to Groq:", prompt);
+		const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+
+		const completion = await groq.chat.completions.create({
+			messages: [
+				{
+					role: "user",
+					content: prompt,
 				},
-				body: JSON.stringify({
-					model,
-					messages: [{ role: "user", content: prompt }],
-					temperature: 0.3,
-				}),
-			},
-		);
-
-		const json = await response.json();
-
-		const reply = json?.choices?.[0]?.message?.content;
+			],
+			temperature: 0.3,
+			model: "openai/gpt-oss-20b",
+		});
+		const reply = completion.choices[0]?.message?.content || "";
 
 		if (!reply) {
 			console.error(
