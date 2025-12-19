@@ -28,12 +28,11 @@ export async function OPTIONS(request: Request) {
 
 export async function POST(request: Request) {
 	const origin = request.headers.get("origin") || "";
-	const headers = {
+	const corsHeaders = {
 		"Access-Control-Allow-Origin": allowedOrigins.includes(origin)
 			? origin
 			: "",
 		"Access-Control-Allow-Headers": "X-Model, Content-Type",
-		"Content-Type": "application/json",
 	};
 
 	try {
@@ -45,47 +44,18 @@ export async function POST(request: Request) {
 				JSON.stringify({ error: "Missing dependencies in request body" }),
 				{
 					status: 400,
-					headers: { ...headers, "Content-Type": "application/json" },
+					headers: { ...corsHeaders, "Content-Type": "application/json" },
 				},
 			);
 		}
 
 		const prompt = buildPrompt(dependencies, devDependencies);
 
-		/*
-    // Open Router
-    console.log("Sending prompt to OpenRouter:", prompt);
-
-    const model = request.headers.get("x-model") || "deepseek/deepseek-r1:free";
-
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://byteshrink.dev",
-          "X-Title": "ByteShrink API",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          temperature: 0.3,
-        }),
-      },
-    );
-
-    const json = await response.json();
-
-    const reply = json?.choices?.[0]?.message?.content;
-    */
-
-		// Groq
+		// Groq with streaming
 		console.log("Sending prompt to Groq:", prompt);
 		const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-		const completion = await groq.chat.completions.create({
+		const stream = await groq.chat.completions.create({
 			messages: [
 				{
 					role: "user",
@@ -94,32 +64,43 @@ export async function POST(request: Request) {
 			],
 			temperature: 0.3,
 			model: "openai/gpt-oss-20b",
+			stream: true,
 		});
-		const reply = completion.choices[0]?.message?.content || "";
 
-		if (!reply) {
-			console.error(
-				"⚠️ No usable content in LLM response:",
-				JSON.stringify(json, null, 2),
-			);
-			return new Response(
-				JSON.stringify({ error: "Empty or malformed LLM response" }),
-				{
-					status: 502,
-					headers: { ...headers, "Content-Type": "application/json" },
-				},
-			);
-		}
+		// Create a ReadableStream to pipe the Groq stream to the client
+		const encoder = new TextEncoder();
+		const readableStream = new ReadableStream({
+			async start(controller) {
+				try {
+					for await (const chunk of stream) {
+						const content = chunk.choices[0]?.delta?.content || "";
+						if (content) {
+							controller.enqueue(encoder.encode(`data: ${JSON.stringify({ content })}\n\n`));
+						}
+					}
+					controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+					controller.close();
+				} catch (error) {
+					console.error("Stream error:", error);
+					controller.error(error);
+				}
+			},
+		});
 
-		return new Response(JSON.stringify({ suggestions: reply }), {
+		return new Response(readableStream, {
 			status: 200,
-			headers: { ...headers, "Content-Type": "application/json" },
+			headers: {
+				...corsHeaders,
+				"Content-Type": "text/event-stream",
+				"Cache-Control": "no-cache",
+				Connection: "keep-alive",
+			},
 		});
 	} catch (err) {
 		console.error("💥 Error in API handler:", err);
 		return new Response(JSON.stringify({ error: "Internal error" }), {
 			status: 500,
-			headers: { ...headers, "Content-Type": "application/json" },
+			headers: { ...corsHeaders, "Content-Type": "application/json" },
 		});
 	}
 }
